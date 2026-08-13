@@ -47,6 +47,23 @@ dependencies, then serves the app and opens a browser at
 <http://127.0.0.1:8723>. Later runs skip straight to serving unless
 `requirements.txt` has changed. Press `Ctrl-C` to stop.
 
+### Or just double-click it
+
+`start.command` is a Finder-launchable version: **double-click it** and it stops
+whatever server is already running, starts a fresh one, and opens the web UI.
+Safe to double-click repeatedly — restarting is the point of it. It leaves a
+Terminal window open running the server; `Ctrl-C` there stops it.
+
+It only ever kills *this* app's server, matched by its own uvicorn command line.
+If something unrelated is squatting on the port it says so and stops, rather
+than killing a process that isn't its business.
+
+If Finder refuses to run it after a fresh clone, restore the executable bit:
+
+```bash
+chmod +x start.command
+```
+
 Useful environment variables:
 
 | Variable | Default | Effect |
@@ -55,6 +72,7 @@ Useful environment variables:
 | `YTX_HOST` | `127.0.0.1` | bind address — localhost only by default |
 | `YTX_NO_BROWSER` | `0` | set to `1` to skip opening a browser |
 | `YTX_DATA_DIR` | `./data` | where the SQLite database lives |
+| `YTX_SHUTDOWN_TIMEOUT` | `3` | seconds uvicorn waits for in-flight requests on stop |
 | `PYTHON` | auto-detected | interpreter used to build the venv |
 
 Anything after `./run.sh` is passed through to uvicorn, so `./run.sh --reload`
@@ -199,7 +217,13 @@ web/
   app.js       all frontend logic, no dependencies and no build step
   style.css
 run.sh         the one command
+start.command  double-clickable restart-and-open launcher for Finder
 ```
+
+An open SSE stream counts as an in-flight response, so uvicorn would otherwise
+wait on it forever and `Ctrl-C` would hang whenever a browser tab was connected.
+The app chains onto uvicorn's signal handler to release the event streams first,
+which makes shutdown immediate; `--timeout-graceful-shutdown` is the backstop.
 
 The frontend is plain JavaScript served straight from disk — there is no
 bundler, no `node_modules`, and no build step. Asset URLs are stamped with the

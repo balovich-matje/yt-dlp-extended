@@ -69,4 +69,8 @@ if [ "${YTX_NO_BROWSER:-0}" != "1" ]; then
   ) &
 fi
 
-exec "$VENV/bin/python" -m uvicorn app.main:app --host "$HOST" --port "$PORT" "$@"
+# An open SSE stream is an in-flight response, and uvicorn waits for those on
+# shutdown — without a bound, Ctrl-C hangs whenever a browser tab is connected.
+exec "$VENV/bin/python" -m uvicorn app.main:app \
+  --host "$HOST" --port "$PORT" \
+  --timeout-graceful-shutdown "${YTX_SHUTDOWN_TIMEOUT:-3}" "$@"

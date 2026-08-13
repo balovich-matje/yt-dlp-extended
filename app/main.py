@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import shutil
+import signal
 import time
 import uuid
 from pathlib import Path
@@ -76,9 +77,33 @@ class SettingsRequest(BaseModel):
 # ------------------------------------------------------------- lifecycle
 
 
+def _install_shutdown_hook() -> None:
+    """Release the SSE streams the moment a stop signal arrives.
+
+    uvicorn waits for in-flight responses *before* running the lifespan shutdown
+    handler, and an idle event stream is an in-flight response — so by the time
+    `on_shutdown` runs it is already blocked. Chaining onto uvicorn's own signal
+    handler lets us close the streams first, turning what would be a
+    timeout-forced kill into a clean exit.
+    """
+    def make(previous):
+        def handler(signum, frame):
+            jobs.broadcast({"type": "server_shutdown"})
+            previous(signum, frame)
+        return handler
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        previous = signal.getsignal(sig)
+        # Only wrap a real handler. If uvicorn has not installed one, leaving
+        # the default in place is safer than replacing it with ours.
+        if callable(previous):
+            signal.signal(sig, make(previous))
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     jobs.set_loop(asyncio.get_running_loop())
+    _install_shutdown_hook()
     db.connect()
     db.mark_orphaned_jobs()
     settings = db.get_settings()
@@ -496,6 +521,8 @@ async def events(request: Request) -> StreamingResponse:
                     # Keep proxies and the browser's connection alive.
                     yield ": keepalive\n\n"
                     continue
+                if event.get("type") == "server_shutdown":
+                    break
                 yield _sse(event)
         finally:
             jobs.unsubscribe(queue)

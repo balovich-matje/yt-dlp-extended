@@ -213,5 +213,10 @@ def run_job(job: dict, coro_factory: Callable[[], Awaitable[None]]) -> None:
 
 
 async def shutdown() -> None:
+    # Wake every SSE generator so it can return instead of idling: an open event
+    # stream is an in-flight response, and uvicorn's graceful shutdown waits on
+    # those. run.sh also passes --timeout-graceful-shutdown as the hard backstop,
+    # because uvicorn reaches this handler only after that wait.
+    broadcast({"type": "server_shutdown"})
     for job_id in list(_procs):
         await cancel_job(job_id)
