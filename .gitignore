@@ -41,6 +41,13 @@ data/
 config.local.*
 settings.local.*
 
+# browser cookies grant access to your accounts — never commit them
+cookies.txt
+cookies*.txt
+*.cookies
+*.binarycookies
+cookies/
+
 # --- python -----------------------------------------------------------------
 .venv/
 venv/

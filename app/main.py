@@ -72,6 +72,8 @@ class SettingsRequest(BaseModel):
     yt_dlp_path: str | None = None
     ffmpeg_path: str | None = None
     ffprobe_path: str | None = None
+    cookies_browser: str | None = None
+    cookies_file: str | None = None
 
 
 # ------------------------------------------------------------- lifecycle
@@ -181,6 +183,25 @@ async def update_settings(req: SettingsRequest) -> dict:
             except OSError as exc:
                 raise HTTPException(400, f"Cannot use {path} as {key}: {exc}")
             updates[key] = str(path)
+
+    browser = (updates.get("cookies_browser") or "").strip()
+    if browser and browser not in download.COOKIE_BROWSERS:
+        raise HTTPException(
+            400,
+            f"Unknown browser {browser!r}. Supported: "
+            + ", ".join(download.COOKIE_BROWSERS),
+        )
+
+    # Catch a bad cookie path here rather than letting every download fail.
+    cookie_file = (updates.get("cookies_file") or "").strip()
+    if cookie_file:
+        path = Path(cookie_file).expanduser()
+        if not path.is_file():
+            raise HTTPException(400, f"Cookie file not found: {path}")
+        if not os.access(path, os.R_OK):
+            raise HTTPException(400, f"Cookie file is not readable: {path}")
+        updates["cookies_file"] = str(path)
+
     settings = db.set_settings(updates)
     jobs.broadcast({"type": "settings"})
     return settings

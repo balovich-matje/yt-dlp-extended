@@ -27,6 +27,9 @@ DEFAULT_SETTINGS = {
     "yt_dlp_path": "",  # blank => auto-discover on PATH
     "ffmpeg_path": "",
     "ffprobe_path": "",
+    # Authentication for age-restricted / private / members-only videos.
+    "cookies_browser": "",  # safari, chrome, firefox, … or blank for none
+    "cookies_file": "",     # exported cookies.txt; takes precedence when set
 }
 
 

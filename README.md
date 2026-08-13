@@ -107,6 +107,45 @@ is still working.
 private scratch directory, so cancelling one job never disturbs another's
 in-progress files.
 
+### Age-restricted and private videos
+
+Some videos need a signed-in session:
+
+```
+ERROR: [youtube] …: Sign in to confirm your age.
+```
+
+Set a cookie source once under **Settings → Cookies** and it applies to both
+metadata lookups and downloads. Two ways:
+
+**Browser extraction** — pick your browser from the dropdown. On macOS the
+cookie stores are protected by TCC, so the terminal running this app needs
+**Full Disk Access** (System Settings → Privacy & Security → Full Disk Access →
+add Terminal), or extraction fails with:
+
+```
+ERROR: [Errno 1] Operation not permitted: …/Cookies.binarycookies
+```
+
+Chrome additionally prompts for your Keychain password, since its cookies are
+encrypted with a key stored there.
+
+**cookies.txt** — export a Netscape-format cookie file and give its path. This
+needs no special permissions and is the easier route if you would rather not
+grant Full Disk Access. The file path wins over the browser dropdown when both
+are set.
+
+Cookie files grant access to your account, so keep them outside this folder.
+The `.gitignore` already excludes `cookies*.txt` and `*.binarycookies` as a
+safety net, but the app never copies or stores cookie contents — it only passes
+the path through to yt-dlp.
+
+To test from the terminal without touching the app:
+
+```bash
+yt-dlp --cookies-from-browser safari "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
 ## Stage 2 — Convert
 
 Pick any library file, or upload one directly.

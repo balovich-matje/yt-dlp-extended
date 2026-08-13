@@ -282,6 +282,40 @@
       <input type="text" id="set-output-dir" spellcheck="false">
     </label>
 
+    <h3>Cookies</h3>
+    <div class="hint">
+      Needed for age-restricted, private and members-only videos. Leave both
+      blank unless a download asks you to sign in.
+    </div>
+    <div class="grid2">
+      <label class="field">
+        <span>Load cookies from browser</span>
+        <select id="set-cookies-browser">
+          <option value="">None</option>
+          <option value="safari">Safari</option>
+          <option value="chrome">Chrome</option>
+          <option value="firefox">Firefox</option>
+          <option value="brave">Brave</option>
+          <option value="edge">Edge</option>
+          <option value="chromium">Chromium</option>
+          <option value="opera">Opera</option>
+          <option value="vivaldi">Vivaldi</option>
+          <option value="whale">Whale</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>…or a cookies.txt file (wins if set)</span>
+        <input type="text" id="set-cookies-file" spellcheck="false" placeholder="/path/to/cookies.txt">
+      </label>
+    </div>
+    <div class="hint">
+      On macOS, reading a browser's cookie store needs your approval: Chrome
+      prompts for your Keychain password, and Safari requires Full Disk Access
+      for the terminal running this app. If that is awkward, export a
+      cookies.txt instead and point at it here — keep it outside this folder,
+      since it grants access to your account.
+    </div>
+
     <h3>Binaries</h3>
     <div class="hint">Leave blank to find them on <code>PATH</code>.</div>
     <div class="grid3">

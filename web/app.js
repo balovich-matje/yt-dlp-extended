@@ -892,6 +892,8 @@ async function loadSettings() {
   $('set-ytdlp').value = s.yt_dlp_path;
   $('set-ffmpeg').value = s.ffmpeg_path;
   $('set-ffprobe').value = s.ffprobe_path;
+  $('set-cookies-browser').value = s.cookies_browser || '';
+  $('set-cookies-file').value = s.cookies_file || '';
 }
 
 $('save-settings').addEventListener('click', async () => {
@@ -905,6 +907,8 @@ $('save-settings').addEventListener('click', async () => {
       yt_dlp_path: $('set-ytdlp').value.trim(),
       ffmpeg_path: $('set-ffmpeg').value.trim(),
       ffprobe_path: $('set-ffprobe').value.trim(),
+      cookies_browser: $('set-cookies-browser').value,
+      cookies_file: $('set-cookies-file').value.trim(),
     });
     status.textContent = 'Saved.';
     loadHealth();

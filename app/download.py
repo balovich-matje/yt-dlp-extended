@@ -35,6 +35,28 @@ class DownloadError(RuntimeError):
     pass
 
 
+# Browsers yt-dlp can pull cookies from directly.
+COOKIE_BROWSERS = [
+    "brave", "chrome", "chromium", "edge", "firefox",
+    "opera", "safari", "vivaldi", "whale",
+]
+
+
+def cookie_args(settings: dict) -> list[str]:
+    """Cookie source for yt-dlp, used for age-restricted and private videos.
+
+    An exported cookies.txt wins over live browser extraction: it is explicit,
+    and it does not need Keychain or Full Disk Access permission at run time.
+    """
+    path = (settings.get("cookies_file") or "").strip()
+    if path:
+        return ["--cookies", path]
+    browser = (settings.get("cookies_browser") or "").strip()
+    if browser:
+        return ["--cookies-from-browser", browser]
+    return []
+
+
 def _num(value: str):
     """yt-dlp writes 'NA' for anything it doesn't know yet."""
     if value in ("", "NA", "None", "N/A"):
@@ -107,7 +129,9 @@ async def fetch_metadata(url: str) -> dict:
     settings = db.get_settings()
     argv = [
         yt_dlp_bin(settings), "-J", "--no-playlist",
-        "--no-warnings", "--no-color", url,
+        "--no-warnings", "--no-color",
+        *cookie_args(settings),
+        url,
     ]
     rc, out, err = await run_capture(argv, timeout=180)
     if rc != 0:
@@ -185,6 +209,7 @@ def build_argv(
         "-P", f"temp:{temp_dir}",
         "-o", "%(title).180B [%(id)s].%(ext)s",
         "-f", selector,
+        *cookie_args(settings),
     ]
 
     if mode == "audio":
