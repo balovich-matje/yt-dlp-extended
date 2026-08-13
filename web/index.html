@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yt-dlp-extended</title>
+<link rel="stylesheet" href="/static/style.css?v=__ASSET_VERSION__">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬇</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>yt-dlp<span class="accent">-extended</span></h1>
+  <div id="health" class="health"></div>
+  <div id="sse-state" class="sse-state" title="Event stream">●</div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="download">Download</button>
+  <button class="tab" data-tab="convert">Convert</button>
+  <button class="tab" data-tab="library">Library <span class="badge" id="lib-count">0</span></button>
+  <button class="tab" data-tab="jobs">Jobs <span class="badge" id="job-count">0</span></button>
+  <button class="tab" data-tab="settings">Settings</button>
+</nav>
+
+<main>
+
+<!-- ============================================================ DOWNLOAD -->
+<section class="panel active" id="tab-download">
+  <div class="card">
+    <label class="field">
+      <span>Video URL</span>
+      <div class="row">
+        <input type="url" id="url" placeholder="https://…  (paste and it fetches automatically)" autocomplete="off">
+        <button id="fetch-meta" class="btn">Fetch info</button>
+      </div>
+    </label>
+    <div id="meta-status" class="status"></div>
+  </div>
+
+  <div class="card hidden" id="meta-card">
+    <div class="meta-head">
+      <img id="meta-thumb" class="thumb" alt="">
+      <div class="meta-text">
+        <h2 id="meta-title"></h2>
+        <div class="meta-sub">
+          <span id="meta-uploader"></span>
+          <span id="meta-duration"></span>
+          <span id="meta-extractor"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <span>Download mode</span>
+      <div class="segmented" id="dl-mode">
+        <button class="seg active" data-mode="full">Full video<small>video + audio</small></button>
+        <button class="seg" data-mode="audio">Audio only<small>no video track</small></button>
+        <button class="seg" data-mode="video">Video only<small>no audio track</small></button>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <label class="field">
+        <span>Quality / format</span>
+        <select id="format-select"></select>
+      </label>
+      <label class="field" id="container-field">
+        <span>Merge container</span>
+        <select id="merge-container">
+          <option value="auto">Auto (let yt-dlp choose)</option>
+          <option value="mp4">mp4</option>
+          <option value="mkv">mkv</option>
+          <option value="webm">webm</option>
+        </select>
+      </label>
+      <label class="field hidden" id="audiofmt-field">
+        <span>Convert audio to</span>
+        <select id="audio-format">
+          <option value="source">Keep source codec</option>
+          <option value="mp3">mp3</option>
+          <option value="m4a">m4a</option>
+          <option value="opus">opus</option>
+          <option value="flac">flac</option>
+          <option value="wav">wav</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="format-note" class="hint"></div>
+    <button id="start-download" class="btn primary big">Download</button>
+  </div>
+
+  <div id="download-jobs" class="joblist"></div>
+</section>
+
+<!-- ============================================================= CONVERT -->
+<section class="panel" id="tab-convert">
+  <div class="card">
+    <div class="grid2">
+      <label class="field">
+        <span>Source file</span>
+        <select id="convert-source"><option value="">— pick a file from the library —</option></select>
+      </label>
+      <label class="field">
+        <span>…or upload one</span>
+        <input type="file" id="upload-input" accept="video/*,audio/*">
+      </label>
+    </div>
+    <div id="source-status" class="status"></div>
+  </div>
+
+  <div class="card hidden" id="convert-card">
+    <!-- ---------------------------------------------------- preview + trim -->
+    <h3>Trim</h3>
+    <div class="preview-wrap">
+      <video id="preview" controls preload="metadata"></video>
+      <div class="timeline" id="timeline">
+        <div class="tl-track"></div>
+        <div class="tl-selection" id="tl-selection"></div>
+        <div class="tl-playhead" id="tl-playhead"></div>
+        <div class="tl-handle in" id="tl-in" title="Drag the in point"></div>
+        <div class="tl-handle out" id="tl-out" title="Drag the out point"></div>
+      </div>
+      <div class="tl-labels">
+        <span id="tl-time">00:00:00.000</span>
+        <span id="tl-dur"></span>
+      </div>
+    </div>
+
+    <div class="grid3">
+      <label class="field">
+        <span>Start (HH:MM:SS.mmm)</span>
+        <div class="row">
+          <input type="text" id="trim-start" value="00:00:00.000" spellcheck="false">
+          <button class="btn small" id="set-in" title="Set from playhead">⇤</button>
+        </div>
+      </label>
+      <label class="field">
+        <span>End (HH:MM:SS.mmm)</span>
+        <div class="row">
+          <input type="text" id="trim-end" spellcheck="false">
+          <button class="btn small" id="set-out" title="Set from playhead">⇥</button>
+        </div>
+      </label>
+      <div class="field">
+        <span>Trimmed length</span>
+        <output id="trim-duration" class="readout">—</output>
+      </div>
+    </div>
+    <div id="trim-error" class="error-inline hidden"></div>
+
+    <!-- ------------------------------------------------------------ output -->
+    <h3>Output</h3>
+    <div class="grid3">
+      <label class="field">
+        <span>Container</span>
+        <select id="container"></select>
+      </label>
+      <label class="field" id="vcodec-field">
+        <span>Video codec</span>
+        <select id="video-codec"></select>
+      </label>
+      <label class="field" id="preset-field">
+        <span>Encoder preset</span>
+        <select id="preset"></select>
+      </label>
+      <label class="field" id="scale-field">
+        <span>Scale to height</span>
+        <select id="scale-height">
+          <option value="">Keep source</option>
+          <option value="2160">2160p</option>
+          <option value="1440">1440p</option>
+          <option value="1080">1080p</option>
+          <option value="720">720p</option>
+          <option value="480">480p</option>
+          <option value="360">360p</option>
+          <option value="240">240p</option>
+        </select>
+      </label>
+      <label class="field" id="fps-field">
+        <span>Frame rate</span>
+        <select id="fps">
+          <option value="">Keep source</option>
+          <option value="60">60</option>
+          <option value="30">30</option>
+          <option value="24">24</option>
+          <option value="15">15</option>
+          <option value="12">12</option>
+          <option value="10">10</option>
+        </select>
+      </label>
+      <label class="field" id="abr-field">
+        <span>Audio bitrate</span>
+        <select id="audio-bitrate">
+          <option value="320000">320 kbps</option>
+          <option value="256000">256 kbps</option>
+          <option value="192000">192 kbps</option>
+          <option value="160000">160 kbps</option>
+          <option value="128000" selected>128 kbps</option>
+          <option value="96000">96 kbps</option>
+          <option value="64000">64 kbps</option>
+        </select>
+      </label>
+    </div>
+
+    <!-- -------------------------------------------------------- size / CRF -->
+    <h3>Size &amp; quality</h3>
+    <div class="segmented" id="size-mode">
+      <button class="seg active" data-mode="quality">Quality mode<small>CRF, size follows</small></button>
+      <button class="seg" data-mode="size">Target size<small>two-pass to a byte budget</small></button>
+    </div>
+
+    <div id="estimate-panel" class="estimate"></div>
+
+    <div id="size-controls" class="hidden">
+      <label class="field">
+        <span>Target size (MB)</span>
+        <div class="row">
+          <input type="range" id="size-slider" min="1" max="100" step="1" value="10">
+          <input type="number" id="size-number" min="0.1" step="0.1" value="10" class="numeric">
+          <span class="unit">MB</span>
+        </div>
+      </label>
+      <div class="hint" id="slider-hint"></div>
+    </div>
+
+    <div id="crf-controls">
+      <label class="field">
+        <span>Quality (CRF) — <span id="crf-value">23</span></span>
+        <input type="range" id="crf" min="0" max="51" step="1" value="23">
+        <div class="hint">Lower is better quality and a bigger file. 18–28 is the useful range for H.264.</div>
+      </label>
+    </div>
+
+    <label class="field">
+      <span>Output file name (without extension)</span>
+      <input type="text" id="output-name" placeholder="auto">
+    </label>
+
+    <button id="start-convert" class="btn primary big">Encode</button>
+  </div>
+
+  <div id="convert-jobs" class="joblist"></div>
+</section>
+
+<!-- ============================================================== LIBRARY -->
+<section class="panel" id="tab-library">
+  <div class="card">
+    <div class="row spread">
+      <h3>Library</h3>
+      <div class="row">
+        <button class="btn" id="scan-library">Rescan folders</button>
+      </div>
+    </div>
+    <div class="hint">Everything downloaded, uploaded or encoded. Deleting removes the file from disk.</div>
+    <div id="library-list" class="library"></div>
+  </div>
+</section>
+
+<!-- ================================================================= JOBS -->
+<section class="panel" id="tab-jobs">
+  <div class="card">
+    <div class="row spread">
+      <h3>All jobs</h3>
+      <button class="btn" id="clear-jobs">Clear finished</button>
+    </div>
+    <div id="all-jobs" class="joblist"></div>
+  </div>
+</section>
+
+<!-- ============================================================= SETTINGS -->
+<section class="panel" id="tab-settings">
+  <div class="card">
+    <h3>Folders</h3>
+    <label class="field">
+      <span>Downloads directory</span>
+      <input type="text" id="set-download-dir" spellcheck="false">
+    </label>
+    <label class="field">
+      <span>Converted output directory</span>
+      <input type="text" id="set-output-dir" spellcheck="false">
+    </label>
+
+    <h3>Binaries</h3>
+    <div class="hint">Leave blank to find them on <code>PATH</code>.</div>
+    <div class="grid3">
+      <label class="field"><span>yt-dlp</span><input type="text" id="set-ytdlp" spellcheck="false"></label>
+      <label class="field"><span>ffmpeg</span><input type="text" id="set-ffmpeg" spellcheck="false"></label>
+      <label class="field"><span>ffprobe</span><input type="text" id="set-ffprobe" spellcheck="false"></label>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="save-settings">Save settings</button>
+      <span id="settings-status" class="status"></span>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js?v=__ASSET_VERSION__"></script>
+</body>
+</html>

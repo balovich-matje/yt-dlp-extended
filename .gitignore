@@ -1,0 +1,58 @@
+# --- downloaded / produced media -------------------------------------------
+downloads/
+output/
+uploads/
+
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.avi
+*.flv
+*.m4v
+*.ts
+*.mp3
+*.m4a
+*.opus
+*.ogg
+*.wav
+*.flac
+*.aac
+*.gif
+
+# yt-dlp / ffmpeg scratch
+*.part
+*.part-Frag*
+*.ytdl
+ffmpeg2pass*.log
+ffmpeg2pass*.log.mbtree
+*.log.temp
+
+# --- local state ------------------------------------------------------------
+data/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+
+# local config overrides
+.env
+config.local.*
+settings.local.*
+
+# --- python -----------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- editors / OS -----------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
