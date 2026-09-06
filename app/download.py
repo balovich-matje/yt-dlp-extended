@@ -23,7 +23,10 @@ PROGRESS_TEMPLATE = (
     "download:" + PROG +
     "%(progress.downloaded_bytes)s|%(progress.total_bytes)s|"
     "%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|"
-    "%(progress.status)s|%(info.format_id)s"
+    "%(progress.status)s|%(info.format_id)s|"
+    # HLS/DASH report no reliable byte total; the fragment counters are the
+    # only trustworthy progress signal for them.
+    "%(progress.fragment_index)s|%(progress.fragment_count)s"
 )
 # Quiet mode (forced by --print) also hides the "[Merger]" notices, so ask for
 # post-processing progress explicitly to keep the phase label truthful.
@@ -55,6 +58,26 @@ def cookie_args(settings: dict) -> list[str]:
     if browser:
         return ["--cookies-from-browser", browser]
     return []
+
+
+def friendly_error(stderr: str, url: str) -> str:
+    """Prepend an explanation to yt-dlp's own message where we can identify it.
+
+    The raw stderr is always kept — it is what makes a failure diagnosable — but
+    "No video formats found!" is genuinely confusing on a site like Pinterest,
+    where most links are images rather than videos.
+    """
+    text = (stderr or "").strip()
+    if "No video formats found" in text:
+        if "pinterest." in url.lower() or "pin.it" in url.lower():
+            note = ("This Pinterest pin has no video attached — it is an image "
+                    "pin. Open the pin and check it actually plays before "
+                    "downloading it.")
+        else:
+            note = ("That link has no downloadable video stream. It may be an "
+                    "image, a text post, or region-locked.")
+        return f"{note}\n\n{text}" if text else note
+    return text
 
 
 def _num(value: str):
@@ -129,13 +152,19 @@ async def fetch_metadata(url: str) -> dict:
     settings = db.get_settings()
     argv = [
         yt_dlp_bin(settings), "-J", "--no-playlist",
+        # A board/channel URL is a playlist extractor, which --no-playlist does
+        # not bound: yt-dlp would resolve every entry before answering. We only
+        # ever show the first one, so ask for exactly that.
+        "--playlist-items", "1",
         "--no-warnings", "--no-color",
         *cookie_args(settings),
         url,
     ]
     rc, out, err = await run_capture(argv, timeout=180)
     if rc != 0:
-        raise DownloadError(err.strip() or f"yt-dlp exited with code {rc}")
+        raise DownloadError(
+            friendly_error(err, url) or f"yt-dlp exited with code {rc}"
+        )
     try:
         info = json.loads(out)
     except json.JSONDecodeError as exc:
@@ -199,7 +228,8 @@ def build_argv(
         yt_dlp_bin(settings),
         # --print implies quiet, which also silences the progress readout;
         # --progress forces it back on so we can parse it.
-        "--no-playlist", "--no-color", "--newline", "--no-simulate", "--progress",
+        "--no-playlist", "--playlist-items", "1",
+        "--no-color", "--newline", "--no-simulate", "--progress",
         "--progress-template", PROGRESS_TEMPLATE,
         "--progress-template", POSTPROCESS_TEMPLATE,
         "--print", PRINT_TEMPLATE,
@@ -289,12 +319,15 @@ def _set_phase(job: dict, state: dict, phase: str) -> None:
 
 def _handle_progress(job: dict, payload: str, state: dict) -> None:
     parts = payload.split("|")
-    if len(parts) < 7:
+    if len(parts) < 9:
         return
-    downloaded, total, total_est, speed, eta, status, fmt_id = parts[:7]
+    (downloaded, total, total_est, speed, eta, status, fmt_id,
+     frag_index, frag_count) = parts[:9]
 
     downloaded_b = _num(downloaded)
-    total_b = _num(total) or _num(total_est)
+    total_known = _num(total)              # a real content-length
+    total_guess = _num(total_est)          # a running guess, and a jumpy one
+    frag_idx, frag_cnt = _num(frag_index), _num(frag_count)
 
     # yt-dlp downloads each selected stream in turn, restarting at 0. Spread the
     # overall bar across the streams we expect so it never runs backwards.
@@ -302,10 +335,22 @@ def _handle_progress(job: dict, payload: str, state: dict) -> None:
         if state.get("current_format") is not None:
             state["done_streams"] += 1
         state["current_format"] = fmt_id
+        state["stream_started"] = asyncio.get_event_loop().time()
 
-    frac = 0.0
-    if downloaded_b is not None and total_b:
-        frac = max(0.0, min(1.0, downloaded_b / total_b))
+    # Order matters. A known byte total is the smoothest signal, but a
+    # fragmented stream has none — and its total_bytes_estimate swings by a
+    # factor of two as segments arrive, which made the bar lurch. Fragment
+    # counters are exact there, so they come before the guess.
+    if downloaded_b is not None and total_known:
+        frac = downloaded_b / total_known
+    elif frag_cnt and frag_idx is not None:
+        frac = frag_idx / frag_cnt
+    elif downloaded_b is not None and total_guess:
+        frac = downloaded_b / total_guess
+    else:
+        frac = 0.0
+    frac = max(0.0, min(1.0, frac))
+    total_b = total_known or total_guess
 
     if state.get("phase") in (None, "Starting", "Queued"):
         _set_phase(job, state, "Downloading")
@@ -322,6 +367,14 @@ def _handle_progress(job: dict, payload: str, state: dict) -> None:
     eta_s = _num(eta)
 
     now = asyncio.get_event_loop().time()
+    if eta_s is None and frac > 0.02:
+        # Fragmented downloads report eta=NA. Extrapolating from elapsed time is
+        # rough, but a moving estimate beats a permanently empty field.
+        started = state.get("stream_started")
+        if started:
+            elapsed = now - started
+            if elapsed > 1:
+                eta_s = max(0.0, elapsed * (1 - frac) / frac)
     detail = dict(job.get("detail") or {})
     detail.update({
         "phase": state.get("phase") or "Downloading",
@@ -334,6 +387,8 @@ def _handle_progress(job: dict, payload: str, state: dict) -> None:
         "stream_count": total_streams,
         "stream_percent": frac * 100.0,
         "status": status,
+        "fragment_index": frag_idx,
+        "fragment_count": frag_cnt,
     })
     job["detail"] = detail
     job["progress"] = state["last_progress"]
@@ -399,7 +454,8 @@ async def run_download(job: dict, req: dict) -> None:
             return
 
         if rc != 0:
-            msg = "\n".join(state["stderr"][-40:]).strip() or f"yt-dlp exited with code {rc}"
+            raw = "\n".join(state["stderr"][-40:])
+            msg = friendly_error(raw, req["url"]) or f"yt-dlp exited with code {rc}"
             jobs.update_job(job, status="error", error=msg)
             return
 

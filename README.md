@@ -146,6 +146,36 @@ To test from the terminal without touching the app:
 yt-dlp --cookies-from-browser safari "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
+### Pinterest and other fragmented (HLS/DASH) sources
+
+Pinterest pins work by pasting the pin URL:
+
+```
+https://www.pinterest.com/pin/664281013778109217/
+```
+
+`pin.it` share links work too — yt-dlp follows the redirect and re-dispatches to
+the Pinterest extractor. Country domains (`.ca`, `.co.uk`, …) and slug-style pin
+URLs are handled by the same extractor.
+
+Two things are worth knowing:
+
+- **Image pins have no video.** Most of Pinterest is still images, and those
+  fail with `No video formats found!`. The app prefixes that with a plain
+  explanation instead of leaving you with the raw message.
+- **Board and profile URLs are slow.** yt-dlp's collection extractor pages
+  through every pin on the board before returning anything, so a large board can
+  take a minute or more. Only the first video is used. The metadata field counts
+  the seconds up so a long fetch does not look frozen. Paste a single pin URL
+  when you can.
+
+Pinterest serves HLS, which has no reliable byte total — its
+`total_bytes_estimate` can swing by a factor of two mid-download. For any
+fragmented stream (Pinterest HLS, YouTube's 4K DASH formats, and most social
+video) progress is taken from the fragment counters instead, which are exact, so
+the bar advances smoothly and the job card shows `fragment 7/15`. A plain HTTP
+download with a real content-length still uses byte progress.
+
 ## Stage 2 — Convert
 
 Pick any library file, or upload one directly.

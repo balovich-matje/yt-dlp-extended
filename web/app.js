@@ -145,8 +145,18 @@ async function fetchMetadata() {
   const seq = ++metaSeq;
   const status = $('meta-status');
   status.className = 'status';
-  status.textContent = 'Fetching metadata…';
   $('fetch-meta').disabled = true;
+
+  // Some extractors are slow — a Pinterest board pages through every pin before
+  // answering — so count up rather than showing a frozen-looking spinner.
+  const started = Date.now();
+  status.textContent = 'Fetching metadata…';
+  const ticker = setInterval(() => {
+    const secs = Math.round((Date.now() - started) / 1000);
+    status.textContent = secs < 5 ? 'Fetching metadata…'
+      : `Fetching metadata… ${secs}s (boards and playlists can take a while)`;
+  }, 1000);
+
   try {
     const meta = await post('/api/metadata', { url });
     if (seq !== metaSeq) return;              // a newer paste won the race
@@ -160,6 +170,7 @@ async function fetchMetadata() {
     status.className = 'status err';
     status.textContent = err.message;
   } finally {
+    clearInterval(ticker);
     if (seq === metaSeq) $('fetch-meta').disabled = false;
   }
 }
@@ -208,7 +219,9 @@ function describeFormat(f, mode) {
   }
   if (f.filesize) bits.push(`~${fmtBytes(f.filesize)}`);
   if (f.dynamic_range && f.dynamic_range !== 'SDR') bits.push(f.dynamic_range);
-  return `${bits.join(' · ')}  [${f.format_id}]`;
+  // Codecs are unknown for some sources (Pinterest's direct MP4s), which would
+  // otherwise leave an empty ` ·  · ` gap in the label.
+  return `${bits.filter(Boolean).join(' · ')}  [${f.format_id}]`;
 }
 
 function renderFormats() {
@@ -731,8 +744,16 @@ function jobPhase(job) {
     if (d.stream_count > 1) bits.push(`stream ${d.stream_index}/${d.stream_count}`);
     if (d.speed) bits.push(`${fmtBytes(d.speed)}/s`);
     if (d.eta) bits.push(`ETA ${fmtDuration(d.eta)}`);
+    // HLS/DASH have no real byte total — only a guess that swings wildly — so
+    // show the fragment position instead of an untrustworthy "x of y".
+    const fragmented = d.fragment_count > 0;
+    if (fragmented) {
+      bits.push(`fragment ${Math.round(d.fragment_index || 0)}/${Math.round(d.fragment_count)}`);
+    }
     if (d.downloaded_bytes) {
-      bits.push(`${fmtBytes(d.downloaded_bytes)}${d.total_bytes ? ` / ${fmtBytes(d.total_bytes)}` : ''}`);
+      bits.push(fragmented
+        ? fmtBytes(d.downloaded_bytes)
+        : `${fmtBytes(d.downloaded_bytes)}${d.total_bytes ? ` / ${fmtBytes(d.total_bytes)}` : ''}`);
     }
   } else {
     if (d.speed) bits.push(`${d.speed}`);
