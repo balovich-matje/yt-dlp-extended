@@ -151,6 +151,39 @@ async def check_cookie_source(settings: dict) -> dict:
     }
 
 
+# Errors that are worth another attempt: the server rejected or dropped this
+# particular connection rather than refusing the content itself.
+TRANSIENT_SIGNS = (
+    "http error 403", "http error 429", "http error 500", "http error 502",
+    "http error 503", "http error 504", "connection reset", "connection aborted",
+    "incompleteread", "remote end closed", "timed out", "timeout",
+    "temporary failure", "unable to download video data",
+)
+MAX_DOWNLOAD_ATTEMPTS = 3
+
+
+def transient_reason(stderr_lines: list[str]) -> str | None:
+    """Return a short label when the failure looks worth retrying."""
+    blob = "\n".join(stderr_lines[-40:]).lower()
+    # Content-level refusals never improve on a retry, whatever else is in the
+    # output, so they win over the transient markers.
+    for permanent in ("sign in to confirm", "no video formats", "private video",
+                      "members-only", "unsupported url", "video unavailable",
+                      "removed by the uploader", "is not available"):
+        if permanent in blob:
+            return None
+    for sign in TRANSIENT_SIGNS:
+        if sign in blob:
+            if "403" in sign:
+                return "HTTP 403"
+            if "429" in sign:
+                return "HTTP 429 (rate limited)"
+            if sign.startswith("http error 5"):
+                return sign.replace("http error ", "HTTP ")
+            return "a dropped connection"
+    return None
+
+
 def _num(value: str):
     """yt-dlp writes 'NA' for anything it doesn't know yet."""
     if value in ("", "NA", "None", "N/A"):
@@ -310,10 +343,9 @@ def build_argv(
         "-P", f"temp:{temp_dir}",
         "-o", "%(title).180B [%(id)s].%(ext)s",
         "-f", selector,
-        # YouTube intermittently 403s a long-running single range request part
-        # way through a large file. Chunking means each request is short lived
-        # and a rejected one is retried instead of killing the whole job.
-        "--http-chunk-size", "10M",
+        # yt-dlp retries 5xx and fragment errors itself. It deliberately does
+        # not retry a 4xx (see downloader/http.py: "err.status < 500 ... raise"),
+        # so an intermittent 403 is handled by retrying the whole command below.
         "--retries", "10",
         "--fragment-retries", "10",
         *cookie_args(settings),
@@ -518,21 +550,48 @@ async def run_download(job: dict, req: dict) -> None:
     jobs.log_line(job, f"$ {detail['command']}")
 
     try:
-        proc = await jobs.spawn(job, argv)
-        await asyncio.gather(
-            _pump_stdout(job, proc, state),
-            _pump_stderr(job, proc, state),
-        )
-        rc = await proc.wait()
+        # yt-dlp will not retry a 403 itself, and YouTube issues them
+        # intermittently part way through large downloads. Re-running the same
+        # command resumes from the partial file in temp_dir rather than starting
+        # over, so another attempt is cheap.
+        for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
+            state["stderr"] = []
+            state["files"] = []
+            state["current_format"] = None
+            state["done_streams"] = 0
 
-        if job.get("cancelled"):
-            jobs.update_job(job, status="cancelled", error="Cancelled by user.",
-                            progress=job["progress"])
-            return
+            if attempt > 1:
+                jobs.log_line(job, f"--- attempt {attempt} of {MAX_DOWNLOAD_ATTEMPTS} ---")
 
-        if rc != 0:
+            proc = await jobs.spawn(job, argv)
+            await asyncio.gather(
+                _pump_stdout(job, proc, state),
+                _pump_stderr(job, proc, state),
+            )
+            rc = await proc.wait()
+
+            if job.get("cancelled"):
+                jobs.update_job(job, status="cancelled", error="Cancelled by user.",
+                                progress=job["progress"])
+                return
+
+            if rc == 0:
+                break
+
+            reason = transient_reason(state["stderr"])
+            if reason and attempt < MAX_DOWNLOAD_ATTEMPTS:
+                _set_phase(job, state,
+                           f"{reason} — retrying ({attempt + 1} of "
+                           f"{MAX_DOWNLOAD_ATTEMPTS})")
+                jobs.log_line(job, f"{reason}; resuming and retrying.")
+                await asyncio.sleep(2 * attempt)
+                continue
+
             raw = "\n".join(state["stderr"][-40:])
             msg = friendly_error(raw, req["url"]) or f"yt-dlp exited with code {rc}"
+            if reason:
+                msg = (f"Failed after {MAX_DOWNLOAD_ATTEMPTS} attempts "
+                       f"({reason} each time).\n\n{msg}")
             jobs.update_job(job, status="error", error=msg)
             return
 

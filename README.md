@@ -155,12 +155,33 @@ yt-dlp --cookies-from-browser safari "https://www.youtube.com/watch?v=VIDEO_ID"
 
 ### Intermittent `HTTP Error 403: Forbidden`
 
-YouTube occasionally rejects a long-running range request part way through a
-large download — the job dies at some arbitrary percentage, and retrying often
-just works. Downloads are therefore requested in 10 MB chunks with retries
-enabled, so one rejected request is retried rather than killing the job.
+YouTube sometimes rejects a download part way through — the job dies at an
+arbitrary percentage, and the very same download succeeds on the next try. It is
+not caused by the format, the account, or cookies: the same command was run six
+times in a row (three signed in, three not) without a single failure, minutes
+after it had failed twice.
 
-If it still happens, check `yt-dlp --version` against the
+yt-dlp cannot paper over this itself. Its HTTP downloader retries 5xx responses
+but deliberately re-raises anything below 500, so `--retries` never applies to a
+403:
+
+```python
+elif err.status < 500 or err.status >= 600:
+    raise           # downloader/http.py
+```
+
+So the app retries the whole command instead, up to three times. A partial
+download is left in the job's scratch directory, and yt-dlp resumes from it
+(`Resuming download at byte 50564677`), so a retry costs only the remainder
+rather than starting over. The job card shows `HTTP 403 — retrying (2 of 3)`
+while it happens.
+
+Retries are limited to failures that a second attempt could plausibly fix —
+4xx rejections, rate limiting, 5xx, and dropped connections. A refusal of the
+content itself (age-gated, private, members-only, removed, no formats) fails
+immediately, because retrying it would only waste time.
+
+If a download fails all three attempts, check `yt-dlp --version` against the
 [latest release](https://github.com/yt-dlp/yt-dlp/releases): a stale yt-dlp is
 the usual cause of YouTube breakage, and Homebrew's formula can lag upstream.
 
