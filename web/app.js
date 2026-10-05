@@ -111,14 +111,18 @@ $('tabs').addEventListener('click', (ev) => {
 async function loadHealth() {
   try {
     const health = await api('/api/health');
-    $('health').innerHTML = Object.entries(health).map(([name, info]) => `
+    $('health').innerHTML = Object.entries(health)
+      .filter(([name]) => name !== 'cookies')
+      .map(([name, info]) => `
       <span class="bin" title="${info.version ? esc(info.version) : 'not found on PATH'}">
         <span class="dot ${info.ok ? 'ok' : ''}"></span>${name}
       </span>`).join('');
-    const missing = Object.entries(health).filter(([, i]) => !i.ok).map(([n]) => n);
+    const missing = Object.entries(health)
+      .filter(([n, i]) => n !== 'cookies' && !i.ok).map(([n]) => n);
     if (missing.length) {
       toast(`Not found on PATH: ${missing.join(', ')}. Set an explicit path under Settings.`, true);
     }
+    renderCookieStatus(health.cookies);
   } catch (err) {
     $('health').textContent = `health check failed: ${err.message}`;
   }
@@ -128,6 +132,25 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
+}
+
+
+/** Show whether the configured cookie source actually produced cookies. */
+function renderCookieStatus(c) {
+  const box = $('cookie-status');
+  if (!box) return;
+  if (!c || !c.configured) {
+    box.className = 'hint';
+    box.textContent = 'No cookie source configured.';
+    return;
+  }
+  if (c.ok) {
+    box.className = 'est-warn note';
+    box.textContent = `✓ ${c.count} cookies available from ${c.source}.`;
+  } else {
+    box.className = 'est-warn severe';
+    box.textContent = `⚠ ${c.message}`;
+  }
 }
 
 /* =================================================== STAGE 1: DOWNLOAD == */
@@ -922,7 +945,7 @@ $('save-settings').addEventListener('click', async () => {
   status.className = 'status';
   status.textContent = 'Saving…';
   try {
-    await post('/api/settings', {
+    const saved = await post('/api/settings', {
       download_dir: $('set-download-dir').value.trim(),
       output_dir: $('set-output-dir').value.trim(),
       yt_dlp_path: $('set-ytdlp').value.trim(),
@@ -932,6 +955,10 @@ $('save-settings').addEventListener('click', async () => {
       cookies_file: $('set-cookies-file').value.trim(),
     });
     status.textContent = 'Saved.';
+    if (saved && saved.cookie_check) {
+      renderCookieStatus(saved.cookie_check);
+      if (!saved.cookie_check.ok) toast(saved.cookie_check.message, true);
+    }
     loadHealth();
   } catch (err) {
     status.className = 'status err';

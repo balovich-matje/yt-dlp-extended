@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shlex
 import shutil
 import tempfile
@@ -78,6 +79,76 @@ def friendly_error(stderr: str, url: str) -> str:
                     "image, a text post, or region-locked.")
         return f"{note}\n\n{text}" if text else note
     return text
+
+
+COOKIE_COUNT_RE = re.compile(r"Extracted (\d+) cookies from (\S+)")
+
+
+async def check_cookie_source(settings: dict) -> dict:
+    """Report whether the configured cookie source actually yields cookies.
+
+    yt-dlp does not treat an unreadable browser cookie store as an error — it
+    says "Extracted 0 cookies" and carries on unauthenticated, so a misconfigured
+    setting fails silently and only shows up later as a sign-in error. Probing
+    with an unsupported URL makes yt-dlp do the extraction and nothing else, so
+    this costs no network traffic.
+    """
+    path = (settings.get("cookies_file") or "").strip()
+    if path:
+        try:
+            lines = [
+                ln for ln in Path(path).read_text(errors="replace").splitlines()
+                if ln.strip() and not ln.lstrip().startswith("#")
+            ]
+        except OSError as exc:
+            return {"configured": True, "source": f"file: {path}", "ok": False,
+                    "count": 0, "message": f"Cookie file could not be read: {exc}"}
+        ok = bool(lines)
+        return {
+            "configured": True, "source": f"file: {path}", "ok": ok,
+            "count": len(lines),
+            "message": "" if ok else "Cookie file contains no cookie entries.",
+        }
+
+    browser = (settings.get("cookies_browser") or "").strip()
+    if not browser:
+        return {"configured": False, "source": "none", "ok": True, "count": 0,
+                "message": ""}
+
+    argv = [yt_dlp_bin(settings), "--cookies-from-browser", browser,
+            "--simulate", "--no-color", "ytdlp-cookie-probe://check"]
+    try:
+        _, out, err = await run_capture(argv, timeout=60)
+    except Exception as exc:
+        return {"configured": True, "source": f"browser: {browser}", "ok": False,
+                "count": 0, "message": f"Could not run the cookie check: {exc}"}
+
+    match = COOKIE_COUNT_RE.search(out + err)
+    if not match:
+        blob = (out + err).lower()
+        if "could not copy" in blob or "permission" in blob or "operation not permitted" in blob:
+            return {"configured": True, "source": f"browser: {browser}", "ok": False,
+                    "count": 0,
+                    "message": f"Cannot read {browser}'s cookie store. On macOS the "
+                               "terminal running this app needs Full Disk Access."}
+        return {"configured": True, "source": f"browser: {browser}", "ok": False,
+                "count": 0, "message": "Could not determine the cookie count."}
+
+    count = int(match.group(1))
+    if count:
+        return {"configured": True, "source": f"browser: {browser}", "ok": True,
+                "count": count, "message": ""}
+    return {
+        "configured": True, "source": f"browser: {browser}", "ok": False, "count": 0,
+        "message": (
+            f"yt-dlp read 0 cookies from {browser}, so downloads are running "
+            "signed-out and age-restricted videos will still fail. On macOS this "
+            "is normally Full Disk Access: grant it to the terminal that runs "
+            "this app (System Settings > Privacy & Security > Full Disk Access), "
+            "then restart it. Exporting a cookies.txt avoids the permission "
+            "entirely."
+        ),
+    }
 
 
 def _num(value: str):
@@ -239,6 +310,12 @@ def build_argv(
         "-P", f"temp:{temp_dir}",
         "-o", "%(title).180B [%(id)s].%(ext)s",
         "-f", selector,
+        # YouTube intermittently 403s a long-running single range request part
+        # way through a large file. Chunking means each request is short lived
+        # and a rejected one is retried instead of killing the whole job.
+        "--http-chunk-size", "10M",
+        "--retries", "10",
+        "--fragment-retries", "10",
         *cookie_args(settings),
     ]
 

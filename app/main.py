@@ -159,6 +159,14 @@ async def health() -> dict:
             except Exception:
                 version = None
         out[name] = {"path": resolved, "ok": bool(resolved), "version": version}
+
+    # A cookie source that silently yields nothing is worth surfacing here: it
+    # looks configured in Settings but downloads run signed-out.
+    try:
+        out["cookies"] = await download.check_cookie_source(settings)
+    except Exception as exc:
+        out["cookies"] = {"configured": True, "ok": False, "count": 0,
+                          "source": "unknown", "message": str(exc)}
     return out
 
 
@@ -204,7 +212,11 @@ async def update_settings(req: SettingsRequest) -> dict:
 
     settings = db.set_settings(updates)
     jobs.broadcast({"type": "settings"})
-    return settings
+    result = dict(settings)
+    if "cookies_browser" in updates or "cookies_file" in updates:
+        # Verify straight away rather than letting a dud setting sit there.
+        result["cookie_check"] = await download.check_cookie_source(settings)
+    return result
 
 
 # ------------------------------------------------------------ stage 1: DL

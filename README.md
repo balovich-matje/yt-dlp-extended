@@ -135,6 +135,13 @@ needs no special permissions and is the easier route if you would rather not
 grant Full Disk Access. The file path wins over the browser dropdown when both
 are set.
 
+**Check that it actually worked.** yt-dlp does not treat an unreadable cookie
+store as an error — it reports `Extracted 0 cookies` and carries on
+unauthenticated, so a misconfigured source fails silently and only shows up
+later as a sign-in error. Settings therefore verifies the source on save and on
+load, and says plainly when it yields nothing. The check probes with an
+unsupported URL, so it makes no network request.
+
 Cookie files grant access to your account, so keep them outside this folder.
 The `.gitignore` already excludes `cookies*.txt` and `*.binarycookies` as a
 safety net, but the app never copies or stores cookie contents — it only passes
@@ -144,6 +151,21 @@ To test from the terminal without touching the app:
 
 ```bash
 yt-dlp --cookies-from-browser safari "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+### Intermittent `HTTP Error 403: Forbidden`
+
+YouTube occasionally rejects a long-running range request part way through a
+large download — the job dies at some arbitrary percentage, and retrying often
+just works. Downloads are therefore requested in 10 MB chunks with retries
+enabled, so one rejected request is retried rather than killing the job.
+
+If it still happens, check `yt-dlp --version` against the
+[latest release](https://github.com/yt-dlp/yt-dlp/releases): a stale yt-dlp is
+the usual cause of YouTube breakage, and Homebrew's formula can lag upstream.
+
+```bash
+brew upgrade yt-dlp
 ```
 
 ### Pinterest and other fragmented (HLS/DASH) sources
