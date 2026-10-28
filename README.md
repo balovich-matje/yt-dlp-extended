@@ -189,6 +189,34 @@ the usual cause of YouTube breakage, and Homebrew's formula can lag upstream.
 brew upgrade yt-dlp
 ```
 
+### Reddit
+
+Paste a post link and the video from the original post is downloaded — any of
+the forms Reddit hands out work, since yt-dlp follows the redirects:
+
+```
+https://www.reddit.com/r/videos/comments/6rrwyj/that_small_heart_attack/
+https://www.reddit.com/r/videos/s/AbCdEf1234        (share button)
+https://redd.it/6rrwyj                              (short link)
+```
+
+If the post links out to YouTube, Imgur and so on rather than hosting the video
+itself, yt-dlp follows that link instead.
+
+**Reddit requires you to be signed in.** Every post fails anonymously with
+`Account authentication is required`, and Reddit's pages answer anonymous
+visitors with a "Prove your humanity" challenge, so there is no signed-out route
+left. To use it:
+
+1. Sign into reddit.com in the browser selected under **Settings → Cookies**.
+2. Paste the link. Nothing else changes.
+
+yt-dlp looks for Reddit's `reddit_session` cookie, so this works with the same
+cookie setup as age-restricted YouTube videos. If you are not signed in, the
+error says so and names the browser it checked, rather than leaving you with
+yt-dlp's generic message. It is never retried, because a login wall does not go
+away on a second attempt.
+
 ### Pinterest and other fragmented (HLS/DASH) sources
 
 Pinterest pins work by pasting the pin URL:
@@ -225,7 +253,16 @@ Pick any library file, or upload one directly.
 
 **Trim.** Start and end take `HH:MM:SS.mmm`. The scrubbable preview player has
 draggable in/out markers, and the `⇤`/`⇥` buttons set each point from the
-playhead. Text entry is always available and is validated against the real
+playhead.
+
+The preview plays **only the selection**. Pressing play outside it jumps to the
+in point, and reaching the out point stops — or, with **Loop** on, starts the
+selection again, so you can watch a five-second cut repeat while you nudge its
+edges. **▶ Play selection** always starts from the in point. Moving a marker
+takes effect immediately: while dragging, the player pauses and shows the frame
+under the marker, and if it was playing it picks straight back up with the new
+cut on release. While paused you can still scrub anywhere to look for new cut
+points. The Loop setting is remembered between visits. Text entry is always available and is validated against the real
 duration from `ffprobe` — inverted ranges, out-of-range endpoints and malformed
 timestamps are rejected before a job starts, with a specific message.
 

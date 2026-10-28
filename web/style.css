@@ -165,6 +165,16 @@ video {
   font-size: 12px; color: var(--muted); margin-top: 2px;
 }
 
+.preview-controls {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px;
+}
+.preview-controls .hint { margin: 0; }
+.toggle {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 14px; color: var(--text); user-select: none;
+}
+.toggle input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+
 /* --------------------------------------------------------------- estimate */
 .estimate {
   background: var(--panel-2); border: 1px solid var(--line);

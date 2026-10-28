@@ -61,14 +61,46 @@ def cookie_args(settings: dict) -> list[str]:
     return []
 
 
-def friendly_error(stderr: str, url: str) -> str:
+def _is_reddit(url: str) -> bool:
+    host = url.lower()
+    return any(h in host for h in ("reddit.com", "redd.it", "redditmedia.com"))
+
+
+def friendly_error(stderr: str, url: str, settings: dict | None = None) -> str:
     """Prepend an explanation to yt-dlp's own message where we can identify it.
 
     The raw stderr is always kept — it is what makes a failure diagnosable — but
-    "No video formats found!" is genuinely confusing on a site like Pinterest,
-    where most links are images rather than videos.
+    some messages are genuinely confusing on their own: "No video formats
+    found!" on a Pinterest image pin, or Reddit's login wall.
     """
     text = (stderr or "").strip()
+    low = text.lower()
+
+    if _is_reddit(url):
+        browser = ((settings or {}).get("cookies_browser") or "").strip()
+        has_file = bool(((settings or {}).get("cookies_file") or "").strip())
+        if "account authentication is required" in low:
+            # yt-dlp only says this when no reddit_session cookie was supplied,
+            # so the configured source demonstrably has no Reddit login in it.
+            if has_file:
+                note = ("Reddit requires you to be signed in, and the cookies.txt "
+                        "in Settings has no Reddit login in it. Re-export it "
+                        "while signed into reddit.com.")
+            elif browser:
+                note = (f"Reddit requires you to be signed in, and {browser} has "
+                        f"no Reddit login. Sign into reddit.com in {browser}, "
+                        "then try again — no other change is needed.")
+            else:
+                note = ("Reddit requires you to be signed in. Sign into "
+                        "reddit.com in your browser, then pick that browser "
+                        "under Settings → Cookies.")
+            return f"{note}\n\n{text}"
+        if "unable to access the reddit api" in low:
+            note = ("You are signed in, but Reddit is refusing API access from "
+                    "this network. That usually means a VPN or a datacenter IP; "
+                    "try again without it.")
+            return f"{note}\n\n{text}"
+
     if "No video formats found" in text:
         if "pinterest." in url.lower() or "pin.it" in url.lower():
             note = ("This Pinterest pin has no video attached — it is an image "
@@ -167,7 +199,9 @@ def transient_reason(stderr_lines: list[str]) -> str | None:
     blob = "\n".join(stderr_lines[-40:]).lower()
     # Content-level refusals never improve on a retry, whatever else is in the
     # output, so they win over the transient markers.
-    for permanent in ("sign in to confirm", "no video formats", "private video",
+    for permanent in ("sign in to confirm", "authentication is required",
+                      "unable to access the reddit api", "login required",
+                      "no video formats", "private video",
                       "members-only", "unsupported url", "video unavailable",
                       "removed by the uploader", "is not available"):
         if permanent in blob:
@@ -267,7 +301,7 @@ async def fetch_metadata(url: str) -> dict:
     rc, out, err = await run_capture(argv, timeout=180)
     if rc != 0:
         raise DownloadError(
-            friendly_error(err, url) or f"yt-dlp exited with code {rc}"
+            friendly_error(err, url, settings) or f"yt-dlp exited with code {rc}"
         )
     try:
         info = json.loads(out)
@@ -588,7 +622,7 @@ async def run_download(job: dict, req: dict) -> None:
                 continue
 
             raw = "\n".join(state["stderr"][-40:])
-            msg = friendly_error(raw, req["url"]) or f"yt-dlp exited with code {rc}"
+            msg = friendly_error(raw, req["url"], settings) or f"yt-dlp exited with code {rc}"
             if reason:
                 msg = (f"Failed after {MAX_DOWNLOAD_ATTEMPTS} attempts "
                        f"({reason} each time).\n\n{msg}")

@@ -458,10 +458,97 @@ $('preview').addEventListener('timeupdate', () => {
   $('tl-time').textContent = fmtTimestamp($('preview').currentTime);
 });
 
+/* ---------------------------------------------- selection-bound playback */
+// The preview plays only the trimmed range: starting playback outside it jumps
+// to the in point, and reaching the out point either stops or loops. While
+// paused the player stays free to scrub anywhere, so you can still hunt for new
+// cut points with the ⇤/⇥ buttons.
+//
+// Bounds are checked every animation frame rather than on `timeupdate`, which
+// fires only about four times a second — enough to overshoot a five-second clip
+// by a quarter of a second.
+const SELECTION_EPS = 0.05;
+const LOOP_KEY = 'ytx.loopSelection';
+let selectionRaf = null;
+
+function selectionBounds() {
+  const { start, end, dur } = trimSeconds();
+  if (!dur || end === null || !(end > start)) return null;
+  return { start: Math.max(0, start), end: Math.min(end, dur) };
+}
+
+function enforceSelection() {
+  const v = $('preview');
+  const b = selectionBounds();
+  if (!b || v.paused || v.seeking) return;
+  if (v.currentTime < b.start - SELECTION_EPS) {
+    v.currentTime = b.start;
+  } else if (v.currentTime >= b.end) {
+    if ($('loop-selection').checked) {
+      v.currentTime = b.start;
+    } else {
+      v.pause();
+      v.currentTime = b.end;
+    }
+  }
+}
+
+function selectionTick() {
+  enforceSelection();
+  selectionRaf = $('preview').paused ? null : requestAnimationFrame(selectionTick);
+}
+
+function playSelection() {
+  const v = $('preview');
+  const b = selectionBounds();
+  if (b) v.currentTime = b.start;
+  v.play().catch(() => { /* autoplay refusal or no source; nothing to do */ });
+}
+
+(function setupSelectionPlayback() {
+  const v = $('preview');
+  v.loop = false;   // native loop would replay the whole file, not the selection
+
+  // Resuming from outside the selection — including from the out point after a
+  // non-looping stop — restarts it, so pressing play always plays the cut.
+  v.addEventListener('play', () => {
+    const b = selectionBounds();
+    if (b && (v.currentTime < b.start - SELECTION_EPS
+              || v.currentTime >= b.end - SELECTION_EPS)) {
+      v.currentTime = b.start;
+    }
+    if (selectionRaf === null) selectionRaf = requestAnimationFrame(selectionTick);
+  });
+  v.addEventListener('pause', () => {
+    if (selectionRaf !== null) cancelAnimationFrame(selectionRaf);
+    selectionRaf = null;
+  });
+  // An out point at the very end of the file ends playback before a frame
+  // check can catch it.
+  v.addEventListener('ended', () => {
+    if ($('loop-selection').checked && selectionBounds()) playSelection();
+  });
+
+  $('play-selection').addEventListener('click', (ev) => {
+    ev.preventDefault();
+    playSelection();
+  });
+
+  const loop = $('loop-selection');
+  try {
+    const saved = localStorage.getItem(LOOP_KEY);
+    loop.checked = saved === null ? true : saved === '1';
+  } catch { loop.checked = true; }
+  loop.addEventListener('change', () => {
+    try { localStorage.setItem(LOOP_KEY, loop.checked ? '1' : '0'); } catch { /* private mode */ }
+  });
+})();
+
 // Dragging the in/out handles, plus click-to-seek on the bare track.
 (function setupTimelineDrag() {
   const timeline = $('timeline');
   let dragging = null;
+  let wasPlaying = false;
 
   const posToSeconds = (clientX) => {
     const rect = timeline.getBoundingClientRect();
@@ -476,6 +563,11 @@ $('preview').addEventListener('timeupdate', () => {
     if (handle) {
       dragging = handle.id === 'tl-in' ? 'start' : 'end';
       timeline.setPointerCapture(ev.pointerId);
+      // Pause while dragging so the player can show the frame under the handle
+      // — the exact frame being cut at — instead of fighting playback.
+      const v = $('preview');
+      wasPlaying = !v.paused;
+      if (wasPlaying) v.pause();
     } else {
       // Clicking the track scrubs the player rather than moving a marker.
       $('preview').currentTime = posToSeconds(ev.clientX);
@@ -492,9 +584,13 @@ $('preview').addEventListener('timeupdate', () => {
     let value = seconds;
     if (dragging === 'start' && other !== null) value = Math.min(value, other - 0.05);
     if (dragging === 'end' && other !== null) value = Math.max(value, other + 0.05);
-    $(dragging === 'start' ? 'trim-start' : 'trim-end').value =
-      fmtTimestamp(Math.max(0, value));
+    value = Math.max(0, value);
+    $(dragging === 'start' ? 'trim-start' : 'trim-end').value = fmtTimestamp(value);
     updateTrimReadout();
+    // Skip while a seek is in flight: queuing one per pointer event makes the
+    // frame lag far behind the handle.
+    const v = $('preview');
+    if (!v.seeking) v.currentTime = value;
   });
 
   const stop = (ev) => {
@@ -502,6 +598,10 @@ $('preview').addEventListener('timeupdate', () => {
     dragging = null;
     try { timeline.releasePointerCapture(ev.pointerId); } catch { /* already released */ }
     if (updateTrimReadout()) refreshEstimate();
+    // If it was playing, pick straight back up with the new cut; if paused,
+    // leave the frame showing where the handle landed.
+    if (wasPlaying) playSelection();
+    wasPlaying = false;
   };
   timeline.addEventListener('pointerup', stop);
   timeline.addEventListener('pointercancel', stop);
