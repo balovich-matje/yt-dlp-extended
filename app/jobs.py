@@ -10,6 +10,8 @@ import asyncio
 import contextlib
 import os
 import signal
+import subprocess
+import sys
 import time
 import uuid
 from typing import Any, Awaitable, Callable
@@ -19,6 +21,8 @@ from . import db
 # Cap on retained stderr so a chatty failure can't grow without bound. The tail
 # is what matters for diagnosing a crash, so we keep the last N lines.
 MAX_LOG_LINES = 400
+
+IS_WINDOWS = sys.platform == "win32"
 
 _jobs: dict[str, dict] = {}
 _procs: dict[str, asyncio.subprocess.Process] = {}
@@ -144,11 +148,15 @@ async def spawn(job: dict, argv: list[str], **kwargs) -> asyncio.subprocess.Proc
     yt-dlp shells out to ffmpeg and ffmpeg spawns nothing, but killing the group
     is what makes cancel reliable for the merge/postprocess phase.
     """
+    if IS_WINDOWS:
+        # No process groups on Windows; _kill_proc uses taskkill /T instead.
+        kwargs.setdefault("creationflags", subprocess.CREATE_NEW_PROCESS_GROUP)
+    else:
+        kwargs.setdefault("start_new_session", True)
     proc = await asyncio.create_subprocess_exec(
         *argv,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
         **kwargs,
     )
     _procs[job["id"]] = proc
@@ -157,6 +165,13 @@ async def spawn(job: dict, argv: list[str], **kwargs) -> asyncio.subprocess.Proc
 
 def _kill_proc(proc: asyncio.subprocess.Process, sig: int) -> None:
     if proc.returncode is not None:
+        return
+    if IS_WINDOWS:
+        # taskkill /T takes the whole tree, including the ffmpeg that yt-dlp
+        # spawns for merging. Windows has no graceful equivalent of SIGTERM for
+        # console children, so this is always forceful.
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       capture_output=True, check=False)
         return
     try:
         os.killpg(os.getpgid(proc.pid), sig)
@@ -178,7 +193,7 @@ async def cancel_job(job_id: str) -> bool:
         try:
             await asyncio.wait_for(proc.wait(), timeout=5)
         except asyncio.TimeoutError:
-            _kill_proc(proc, signal.SIGKILL)
+            _kill_proc(proc, getattr(signal, "SIGKILL", signal.SIGTERM))
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(proc.wait(), timeout=5)
 

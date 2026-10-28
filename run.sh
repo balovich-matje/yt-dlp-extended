@@ -61,7 +61,9 @@ if [ "${YTX_NO_BROWSER:-0}" != "1" ]; then
   (
     for _ in $(seq 1 50); do
       if curl -fsS -o /dev/null "${URL}api/health" 2>/dev/null; then
-        command -v open >/dev/null 2>&1 && open "$URL"
+        if command -v open >/dev/null 2>&1; then open "$URL"            # macOS
+        elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL" >/dev/null 2>&1  # Linux
+        fi
         break
       fi
       sleep 0.2

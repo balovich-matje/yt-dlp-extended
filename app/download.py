@@ -6,6 +6,7 @@ import json
 import re
 import shlex
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -163,6 +164,14 @@ async def check_cookie_source(settings: dict) -> dict:
                     "count": 0,
                     "message": f"Cannot read {browser}'s cookie store. On macOS the "
                                "terminal running this app needs Full Disk Access."}
+        if sys.platform == "win32" and browser in ("chrome", "edge", "brave", "chromium", "opera", "vivaldi"):
+            # Chromium's app-bound cookie encryption on Windows stops external
+            # tools from decrypting the cookie store at all.
+            return {"configured": True, "source": f"browser: {browser}", "ok": False,
+                    "count": 0,
+                    "message": f"{browser} on Windows encrypts its cookies so that "
+                               "other programs cannot read them. Choose Firefox "
+                               "here instead, or export a cookies.txt."}
         return {"configured": True, "source": f"browser: {browser}", "ok": False,
                 "count": 0, "message": "Could not determine the cookie count."}
 
