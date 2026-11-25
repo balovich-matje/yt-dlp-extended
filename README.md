@@ -170,7 +170,17 @@ Resolution, frame rate and audio bitrate can be overridden.
 the exact command and its output.
 
 **YouTube downloads failing?** Update yt-dlp first — YouTube changes often and old
-versions break:
+versions break. The app checks GitHub for new releases every few hours and shows a
+banner with an **Update now** button when one is out. Under **Settings → yt-dlp
+updates** you can also turn on automatic updates; those only run while no downloads are
+in progress.
+
+The update goes through whatever installed yt-dlp — Homebrew, pipx, winget, pip or the
+standalone binary — so it may also update that tool's dependencies. Homebrew and
+winget sometimes trail a GitHub release by a day or two, and the app says so when an
+update finds nothing new. If yt-dlp came from a Linux distribution's package manager,
+the app can't update it (that needs admin rights); install it with pipx instead. To
+update by hand:
 
 | | |
 | --- | --- |
@@ -203,6 +213,7 @@ app/main.py      web API and live progress stream (Server-Sent Events)
 app/download.py  yt-dlp: metadata, format choice, progress, retries, cookies
 app/convert.py   ffmpeg: size estimator, command building, two-pass encoding
 app/jobs.py      background jobs and cancellation
+app/updater.py   checks for and installs yt-dlp updates
 app/db.py        SQLite storage
 web/             the single-page interface — plain JavaScript, no build step
 run.sh           launcher for macOS and Linux

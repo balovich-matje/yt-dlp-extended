@@ -23,6 +23,8 @@
   <button class="tab" data-tab="settings">Settings</button>
 </nav>
 
+<div id="update-banner" class="update-banner hidden"></div>
+
 <main>
 
 <!-- ============================================================ DOWNLOAD -->
@@ -322,6 +324,21 @@
       for the terminal running this app. If that is awkward, export a
       cookies.txt instead and point at it here — keep it outside this folder,
       since it grants access to your account.
+    </div>
+
+    <h3>yt-dlp updates</h3>
+    <div id="ytdlp-status" class="hint">Checking…</div>
+    <div class="row" style="margin-bottom:14px">
+      <button class="btn small" id="ytdlp-check" type="button">Check now</button>
+      <button class="btn small primary hidden" id="ytdlp-update" type="button">Update now</button>
+    </div>
+    <label class="toggle" style="margin-bottom:6px">
+      <input type="checkbox" id="ytdlp-auto"> Update yt-dlp automatically
+    </label>
+    <div class="hint">
+      Checks GitHub every few hours. Updates only run while no downloads are in
+      progress, and use whatever installed yt-dlp (for example Homebrew), which may
+      also update its dependencies.
     </div>
 
     <h3>Binaries</h3>

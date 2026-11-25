@@ -30,6 +30,7 @@ DEFAULT_SETTINGS = {
     # Authentication for age-restricted / private / members-only videos.
     "cookies_browser": "",  # safari, chrome, firefox, … or blank for none
     "cookies_file": "",     # exported cookies.txt; takes precedence when set
+    "ytdlp_auto_update": "0",  # "1": update yt-dlp unattended when idle
 }
 
 

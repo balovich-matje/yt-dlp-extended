@@ -272,3 +272,15 @@ details > summary {
   box-shadow: 0 8px 28px rgba(0,0,0,.5); font-size: 14px; white-space: pre-wrap;
 }
 .toast.err { border-color: #56302f; color: #ffb4b4; }
+
+/* --------------------------------------------------------- update banner */
+.update-banner {
+  /* Same width as the cards: main is 940px wide with 20px of padding. */
+  max-width: 900px; margin: 14px auto 0; padding: 10px 14px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: #16202b; border: 1px solid #274056; color: #a9c9e6;
+  border-radius: 8px; font-size: 14px;
+}
+.update-banner .grow { flex: 1; min-width: 220px; }
+.update-banner code { color: var(--text); }
+@media (max-width: 940px) { .update-banner { margin: 14px 20px 0; } }

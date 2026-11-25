@@ -925,7 +925,7 @@ function renderJob(job) {
       ${job.detail?.output_path ? `<div class="job-meta"><span>${esc(job.detail.output_path)}</span></div>` : ''}
       ${job.error ? `<div class="job-error">${esc(job.error)}</div>` : ''}
       <div class="job-actions">
-        ${active ? `<button class="btn small danger" data-act="cancel" data-id="${job.id}">Cancel</button>` : ''}
+        ${active && job.kind !== 'update' ? `<button class="btn small danger" data-act="cancel" data-id="${job.id}">Cancel</button>` : ''}
         ${!active ? `<button class="btn small" data-act="remove" data-id="${job.id}">Remove</button>` : ''}
       </div>
       ${log ? `<details><summary>Process output (${log.split('\n').length} lines)</summary><div class="job-log">${esc(log)}</div></details>` : ''}
@@ -1016,6 +1016,10 @@ function connectEvents() {
         if (msg.job.status === 'done') toast(`Finished: ${msg.job.title}`);
         if (msg.job.status === 'error') toast(`Failed: ${msg.job.title}`, true);
       }
+      // An update started elsewhere (the auto-updater) should show up too.
+      if (msg.job.kind === 'update' && (!previous || previous.status !== msg.job.status)) {
+        loadUpdateStatus();
+      }
     } else if (msg.type === 'log') {
       const job = state.jobs.get(msg.job_id);
       if (job) job.log = (job.log ? `${job.log}\n` : '') + msg.line;
@@ -1023,6 +1027,9 @@ function connectEvents() {
       loadLibrary();
     } else if (msg.type === 'jobs_changed') {
       loadJobs();
+    } else if (msg.type === 'ytdlp') {
+      loadUpdateStatus();
+      loadHealth();
     }
   };
 }
@@ -1066,11 +1073,110 @@ $('save-settings').addEventListener('click', async () => {
   }
 });
 
+/* ======================================================== YT-DLP UPDATES */
+
+function timeAgo(ts) {
+  if (!ts) return 'never';
+  const secs = Math.max(0, Date.now() / 1000 - ts);
+  if (secs < 90) return 'just now';
+  if (secs < 5400) return `${Math.round(secs / 60)} min ago`;
+  if (secs < 129600) return `${Math.round(secs / 3600)} h ago`;
+  return `${Math.round(secs / 86400)} days ago`;
+}
+
+async function loadUpdateStatus(force = false) {
+  try {
+    const st = await api(`/api/ytdlp/status${force ? '?refresh=true' : ''}`);
+    state.ytdlp = st;
+    renderUpdateStatus(st);
+    return st;
+  } catch (err) {
+    $('ytdlp-status').textContent = `Could not read the yt-dlp status: ${err.message}`;
+    return null;
+  }
+}
+
+function renderUpdateStatus(st) {
+  const banner = $('update-banner');
+  const age = st.age_days !== null && st.age_days !== undefined ? ` (${st.age_days} days old)` : '';
+
+  if (st.updating) {
+    banner.innerHTML = '<span class="grow">Updating yt-dlp… new downloads will start once it finishes. ' +
+      'Progress is on the Jobs tab.</span>';
+    banner.classList.remove('hidden');
+  } else if (st.update_available) {
+    const action = st.can_update
+      ? '<button class="btn small primary" type="button" data-ytdlp-update>Update now</button>'
+      : `<span>${esc(st.manual_hint)}</span>`;
+    banner.innerHTML =
+      `<span class="grow">yt-dlp <b>${esc(st.latest)}</b> is available — you have ` +
+      `${esc(st.installed)}${esc(age)}. An outdated yt-dlp is the usual cause of YouTube errors.</span>` +
+      action;
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
+
+  const bits = [];
+  bits.push(st.installed ? `Installed: ${st.installed}${age}, via ${st.method_label}` : 'yt-dlp was not found');
+  if (st.update_available) bits.push(`${st.latest} is available`);
+  else if (st.latest) bits.push('up to date');
+  bits.push(`last checked ${timeAgo(st.checked_at)}`);
+  if (st.check_error) bits.push(st.check_error);
+  if (!st.can_update && st.manual_hint) bits.push(st.manual_hint);
+  $('ytdlp-status').textContent = bits.join(' · ');
+
+  $('ytdlp-update').classList.toggle('hidden', !(st.update_available && st.can_update && !st.updating));
+  $('ytdlp-auto').checked = !!st.auto_update;
+  $('ytdlp-auto').disabled = !st.can_update;
+}
+
+async function startYtdlpUpdate(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const job = await api('/api/ytdlp/update', { method: 'POST' });
+    toast('Updating yt-dlp…');
+    renderUpdateStatus({ ...state.ytdlp, updating: job.id });
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+$('update-banner').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('[data-ytdlp-update]');
+  if (btn) startYtdlpUpdate(btn);
+});
+$('ytdlp-update').addEventListener('click', (ev) => startYtdlpUpdate(ev.currentTarget));
+
+$('ytdlp-check').addEventListener('click', async (ev) => {
+  const btn = ev.currentTarget;
+  btn.disabled = true;
+  $('ytdlp-status').textContent = 'Checking GitHub…';
+  const st = await loadUpdateStatus(true);
+  btn.disabled = false;
+  if (st && !st.check_error) toast(st.update_available ? `yt-dlp ${st.latest} is available.` : 'yt-dlp is up to date.');
+});
+
+$('ytdlp-auto').addEventListener('change', async (ev) => {
+  const on = ev.currentTarget.checked;
+  try {
+    await post('/api/settings', { ytdlp_auto_update: on });
+    toast(on ? 'yt-dlp will now update itself when idle.' : 'Automatic yt-dlp updates are off.');
+  } catch (err) {
+    ev.currentTarget.checked = !on;
+    toast(err.message, true);
+  }
+});
+
 /* ================================================================== BOOT */
 
 (async function boot() {
   connectEvents();
   try {
+    // Not awaited with the rest: it asks GitHub, and the page shouldn't wait on that.
+    loadUpdateStatus();
     await Promise.all([loadHealth(), loadContainers(), loadLibrary(), loadJobs(), loadSettings()]);
   } catch (err) {
     toast(`Startup problem: ${err.message}`, true);

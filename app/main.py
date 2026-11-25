@@ -20,7 +20,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import convert, db, download, jobs, media
+from . import convert, db, download, jobs, media, updater
 from .config import (
     DEFAULT_SETTINGS, PATH_SETTINGS, WEB_DIR, ensure_dirs,
     ffmpeg_bin, ffprobe_bin, yt_dlp_bin,
@@ -74,6 +74,7 @@ class SettingsRequest(BaseModel):
     ffprobe_path: str | None = None
     cookies_browser: str | None = None
     cookies_file: str | None = None
+    ytdlp_auto_update: bool | None = None
 
 
 # ------------------------------------------------------------- lifecycle
@@ -110,10 +111,12 @@ async def on_startup() -> None:
     db.mark_orphaned_jobs()
     settings = db.get_settings()
     ensure_dirs(Path(settings["download_dir"]), Path(settings["output_dir"]))
+    updater.start_auto_updater()
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    updater.stop_auto_updater()
     await jobs.shutdown()
 
 
@@ -181,6 +184,8 @@ async def get_settings() -> dict:
 @app.post("/api/settings")
 async def update_settings(req: SettingsRequest) -> dict:
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    if "ytdlp_auto_update" in updates:
+        updates["ytdlp_auto_update"] = "1" if updates["ytdlp_auto_update"] else "0"
     for key in PATH_SETTINGS:
         if key in updates:
             path = Path(updates[key]).expanduser()
@@ -219,6 +224,29 @@ async def update_settings(req: SettingsRequest) -> dict:
     return result
 
 
+
+# ------------------------------------------------------------ yt-dlp updates
+
+
+def _refuse_while_updating() -> None:
+    # During an update the yt-dlp binary is briefly missing or half replaced.
+    if updater.update_in_progress():
+        raise HTTPException(409, "yt-dlp is being updated — try again in a moment.")
+
+
+@app.get("/api/ytdlp/status")
+async def ytdlp_status(refresh: bool = False) -> dict:
+    return await updater.status(force=refresh)
+
+
+@app.post("/api/ytdlp/update")
+async def ytdlp_update() -> dict:
+    try:
+        job = updater.start_update()
+    except updater.UpdateRefused as exc:
+        raise HTTPException(409, str(exc))
+    return jobs.public_job(job)
+
 # ------------------------------------------------------------ stage 1: DL
 
 
@@ -227,6 +255,7 @@ async def metadata(req: MetadataRequest) -> dict:
     url = req.url.strip()
     if not url:
         raise HTTPException(400, "A URL is required.")
+    _refuse_while_updating()
     return await download.fetch_metadata(url)
 
 
@@ -236,6 +265,7 @@ async def start_download(req: DownloadRequest) -> dict:
         raise HTTPException(400, "A URL is required.")
     if req.mode not in ("full", "audio", "video"):
         raise HTTPException(400, f"Unknown download mode {req.mode!r}.")
+    _refuse_while_updating()
     job = download.start_download(req.model_dump())
     return jobs.public_job(job)
 
@@ -504,6 +534,10 @@ async def get_job(job_id: str) -> dict:
 
 @app.post("/api/jobs/{job_id}/cancel")
 async def cancel_job(job_id: str) -> dict:
+    job = jobs.get_job(job_id)
+    if job and job.get("kind") == "update":
+        # Killing a package manager mid-install can leave yt-dlp half replaced.
+        raise HTTPException(400, "An update can't be safely interrupted; it will finish shortly.")
     ok = await jobs.cancel_job(job_id)
     if not ok:
         raise HTTPException(400, "That job is not running.")
